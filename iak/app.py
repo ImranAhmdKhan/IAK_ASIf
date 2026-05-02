@@ -383,7 +383,7 @@ class IAKApp:
         self.root.after(1000, self._update_timer)
 
     def _refresh_eta(self):
-        if self.is_running and 0.0 < self._last_progress_percent < 100.0:
+        if self.is_running and 0.01 < self._last_progress_percent < 100.0:
             elapsed = time.time() - self.start_time
             eta = _fmt_duration(elapsed * (100.0 - self._last_progress_percent) / self._last_progress_percent)
             if hasattr(self, "iak_progress_eta_lbl"):
@@ -3285,7 +3285,8 @@ class IAKApp:
                     break
 
             if shape is None:
-                # Fall back: search for any factoring close to expected dimensions
+                # Fall back: search a small margin around the expected row count
+                # (±2 rows) to handle off-by-one differences in step reporting.
                 for rows in range(max(1, n1 - 1), n1 + 3):
                     if N % rows == 0:
                         cols = N // rows
