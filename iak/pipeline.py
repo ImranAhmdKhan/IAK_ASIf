@@ -257,7 +257,7 @@ class Pipeline:
                             crest_flags = f"{self.config.crest_method} -T {self.config.cores}"
                             res = self._run_engine_via_wrapper(v["path"], "crest", crest_flags, log_cb, status_cb)
                             if res["status"] != "success":
-                                _log("[WARNING] CREST trial MD did not converge. Retrying with reduced time step (--tstep 1 --mdlen 0.5)...")
+                                _log("[WARNING] CREST failed (possible trial MD convergence issue). Retrying with reduced time step (--tstep 1 --mdlen 0.5)...")
                                 res = self._run_engine_via_wrapper(v["path"], "crest", f"{crest_flags} --tstep 1 --mdlen 0.5", log_cb, status_cb)
                             if res["status"] == "success":
                                 final_conf = os.path.join(self.dirs["crest"], f"crest_conformers_{k}.xyz")
