@@ -163,6 +163,7 @@ class IAKApp:
         self.preview_file = None
         self.is_running = False
         self.start_time = 0
+        self._last_progress_percent = 0.0
         self._color_buttons = {}
         self._build_ui()
         setup_logging(gui_queue=self._q)
@@ -381,6 +382,14 @@ class IAKApp:
             self.timer_lbl.config(text=f"{hrs:02d}:{mins:02d}:{secs:02d}")
         self.root.after(1000, self._update_timer)
 
+    def _refresh_eta(self):
+        if self.is_running and 0.0 < self._last_progress_percent < 100.0:
+            elapsed = time.time() - self.start_time
+            eta = _fmt_duration(elapsed * (100.0 - self._last_progress_percent) / self._last_progress_percent)
+            if hasattr(self, "iak_progress_eta_lbl"):
+                self.iak_progress_eta_lbl.config(text=f"ETA: {eta}")
+        self.root.after(1000, self._refresh_eta)
+
     def _update_installation_labels(self):
         xtb_ok, crest_ok, orca_ok = is_tool_available("xtb"), is_tool_available("crest"), is_tool_available("orca")
         self._xtb_lbl.config(text="xTB: Ready" if xtb_ok else "xTB: Missing", fg=_C["green"] if xtb_ok else _C["red"])
@@ -427,6 +436,7 @@ class IAKApp:
             self._build_graph_tab(self.tab_graph)
             self._build_table_tab(self.tab_table)
         self.root.after(1000, self._update_timer)
+        self.root.after(1000, self._refresh_eta)
 
     def _build_pipeline_tab(self, parent):
         main = tk.PanedWindow(parent, orient=tk.HORIZONTAL, sashwidth=6, sashrelief=tk.RAISED, bg=_C["border"], bd=0)
@@ -714,6 +724,7 @@ class IAKApp:
             eta = _fmt_duration(elapsed * (100.0 - percent) / percent)
         elif percent <= 0.0:
             eta = "estimating"
+        self._last_progress_percent = percent
         stage = self._normalize_stage(payload.get("stage", "Pipeline"))
         status = payload.get("status", "running").title()
         message = payload.get("message") or stage
@@ -3006,7 +3017,25 @@ class IAKApp:
             f.write(geoms[max_idx])
             
         if use_c2 and MATPLOTLIB_AVAILABLE:
-            self._generate_3d_pes_plot(work_dir, c1_steps, c2_steps, energies)
+            self._generate_3d_pes_plot(work_dir, c1_steps, c2_steps, energies, c1_s, c1_e, c2_s, c2_e)
+
+    def _build_orca_pes_cmd(self, inp_file, out_file, work_dir):
+        """Return a shell command string that runs ORCA with proper OpenMPI env vars."""
+        if _engines.ORCA_DIR:
+            orca_bin = f"'{os.path.join(os.path.abspath(_engines.ORCA_DIR), 'orca')}'"
+        else:
+            orca_bin = "orca"
+        env_str = (
+            "export OMPI_ALLOW_RUN_AS_ROOT=1; "
+            "export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1; "
+            "export OMPI_MCA_btl_vader_single_copy_mechanism=none; "
+            "export OMPI_MCA_btl='^openib'; "
+            "export OMPI_MCA_rmaps_base_oversubscribe=1; "
+            "export OMPI_MCA_hwloc_base_binding_policy=none; "
+            "export OMP_NUM_THREADS=1; "
+            "ulimit -s unlimited 2>/dev/null; "
+        )
+        return f"cd '{work_dir}' && {env_str}{orca_bin} {inp_file} > {out_file} 2>&1"
 
     def _run_orca_pes(self, work_dir, mol_file, c1_a1, c1_a2, c1_s, c1_e, c1_steps, use_c2, c2_a1, c2_a2, c2_s, c2_e, c2_steps, charge, multiplicity):
         self._pes_log("Running ORCA relaxed scan... (This may take a very long time)")
@@ -3026,7 +3055,7 @@ class IAKApp:
                 f.write(f"{a.symbol} {a.x} {a.y} {a.z}\n")
             f.write("*\n")
             
-        cmd = f"orca orca_pes.inp > orca_pes.out"
+        cmd = self._build_orca_pes_cmd("orca_pes.inp", "orca_pes.out", work_dir)
         subprocess.run(cmd, shell=True, cwd=work_dir)
         
         out_path = os.path.join(work_dir, "orca_pes.out")
@@ -3071,7 +3100,7 @@ class IAKApp:
             f.write(geoms[max_idx])
             
         if use_c2 and MATPLOTLIB_AVAILABLE:
-            self._generate_3d_pes_plot(work_dir, c1_steps, c2_steps, energies)
+            self._generate_3d_pes_plot(work_dir, c1_steps, c2_steps, energies, c1_s, c1_e, c2_s, c2_e)
 
     def _run_xtb_ts(self, work_dir, ts_guess_path, charge, multiplicity):
         self._pes_log("Running xTB Transition State Optimization (--opt ts)...")
@@ -3112,7 +3141,7 @@ class IAKApp:
                 f.write(f"{a.symbol} {a.x} {a.y} {a.z}\n")
             f.write("*\n")
             
-        cmd = f"orca orca_ts.inp > orca_ts.out"
+        cmd = self._build_orca_pes_cmd("orca_ts.inp", "orca_ts.out", work_dir)
         self._pes_log("Running ORCA OptTS... (this may take a long time)")
         subprocess.run(cmd, shell=True, cwd=work_dir)
         
@@ -3202,7 +3231,7 @@ class IAKApp:
                 f.write(f"{a.symbol} {a.x} {a.y} {a.z}\n")
             f.write("*\n")
             
-        cmd = f"orca orca_neb.inp > orca_neb.out"
+        cmd = self._build_orca_pes_cmd("orca_neb.inp", "orca_neb.out", work_dir)
         subprocess.run(cmd, shell=True, cwd=work_dir)
         
         out_path = os.path.join(work_dir, "orca_neb.out")
@@ -3235,44 +3264,95 @@ class IAKApp:
         except Exception as e:
             self._pes_log(f"Failed to generate 1D plot: {str(e)}")
 
-    def _generate_3d_pes_plot(self, work_dir, c1_steps, c2_steps, energies):
+    def _generate_3d_pes_plot(self, work_dir, c1_steps, c2_steps, energies,
+                               c1_start=None, c1_end=None, c2_start=None, c2_end=None):
         try:
             import matplotlib.pyplot as plt
-            from mpl_toolkits.mplot3d import Axes3D
-            
+            from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
             N = len(energies)
-            # Adjust dimensions depending on inclusive/exclusive steps. Usually step count = N intervals -> N+1 points.
-            # But let's just attempt a safe reshape.
-            # Try to infer dims if c1_steps and c2_steps don't match exactly
-            import math
-            possible_cols = [int(c1_steps), int(c1_steps)+1, int(c2_steps), int(c2_steps)+1]
-            cols = None
-            for c in possible_cols:
-                if c > 0 and N % c == 0:
-                    cols = c
-                    break
-                    
-            if cols is None:
-                self._pes_log(f"Warning: Cannot reshape energy array ({N} points) for a 3D plot smoothly. Plot skipped.")
+            if N == 0:
+                self._pes_log("No energy data available for 3D PES plot.")
                 return
-                
-            rows = N // cols
+
+            n1, n2 = int(c1_steps), int(c2_steps)
+
+            # Try exact grid shapes before falling back to heuristics
+            shape = None
+            for rows, cols in [(n1, n2), (n1 + 1, n2 + 1), (n1 + 1, n2), (n1, n2 + 1)]:
+                if rows > 0 and cols > 0 and rows * cols == N:
+                    shape = (rows, cols)
+                    break
+
+            if shape is None:
+                # Fall back: search for any factoring close to expected dimensions
+                for rows in range(max(1, n1 - 1), n1 + 3):
+                    if N % rows == 0:
+                        cols = N // rows
+                        if abs(cols - n2) <= 2:
+                            shape = (rows, cols)
+                            break
+
+            if shape is None:
+                self._pes_log(
+                    f"Warning: Cannot reshape {N} energy points for 3D plot "
+                    f"(expected ~{n1}×{n2}). Plot skipped."
+                )
+                return
+
+            rows, cols = shape
             Z = np.array(energies).reshape(rows, cols)
-            X, Y = np.meshgrid(range(cols), range(rows))
-            
-            fig = plt.figure(figsize=(8,6))
-            ax = fig.add_subplot(111, projection='3d')
-            surf = ax.plot_surface(X, Y, Z, cmap='viridis')
-            fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
-            ax.set_title("2D Relaxed Scan PES")
-            ax.set_xlabel("Coord 1 (Steps)")
-            ax.set_ylabel("Coord 2 (Steps)")
-            ax.set_zlabel("Energy (Eh)")
-            
+            # Convert to relative energies in kcal/mol
+            Z_rel = (Z - Z.min()) * EH2KCAL
+
+            # Build physical axis arrays in Å
+            if c1_start is not None and c1_end is not None:
+                x_vals = np.linspace(float(c1_start), float(c1_end), cols)
+                x_label = "Coord 1 (Å)"
+            else:
+                x_vals = np.arange(cols, dtype=float)
+                x_label = "Coord 1 (steps)"
+            if c2_start is not None and c2_end is not None:
+                y_vals = np.linspace(float(c2_start), float(c2_end), rows)
+                y_label = "Coord 2 (Å)"
+            else:
+                y_vals = np.arange(rows, dtype=float)
+                y_label = "Coord 2 (steps)"
+
+            X, Y = np.meshgrid(x_vals, y_vals)
+
+            fig = plt.figure(figsize=(13, 5))
+
+            # 3D surface plot
+            ax3d = fig.add_subplot(121, projection="3d")
+            surf = ax3d.plot_surface(X, Y, Z_rel, cmap="viridis", edgecolor="none", alpha=0.92)
+            fig.colorbar(surf, ax=ax3d, shrink=0.5, aspect=8, label="ΔE (kcal/mol)")
+            ax3d.set_title("PES Surface", fontsize=11, fontweight="bold")
+            ax3d.set_xlabel(x_label, fontsize=9)
+            ax3d.set_ylabel(y_label, fontsize=9)
+            ax3d.set_zlabel("ΔE (kcal/mol)", fontsize=9)
+
+            # 2D contour map with TS and minimum markers
+            ax2d = fig.add_subplot(122)
+            contour = ax2d.contourf(X, Y, Z_rel, levels=20, cmap="viridis")
+            fig.colorbar(contour, ax=ax2d, label="ΔE (kcal/mol)")
+            ax2d.contour(X, Y, Z_rel, levels=20, colors="white", linewidths=0.3, alpha=0.4)
+            min_idx = np.unravel_index(np.argmin(Z_rel), Z_rel.shape)
+            max_idx = np.unravel_index(np.argmax(Z_rel), Z_rel.shape)
+            ax2d.plot(X[min_idx], Y[min_idx], "g*", markersize=13,
+                      label=f"Min  {Z_rel[min_idx]:.2f} kcal/mol")
+            ax2d.plot(X[max_idx], Y[max_idx], "r^", markersize=11,
+                      label=f"TS guess  {Z_rel[max_idx]:.2f} kcal/mol")
+            ax2d.set_xlabel(x_label, fontsize=10)
+            ax2d.set_ylabel(y_label, fontsize=10)
+            ax2d.set_title("PES Contour Map", fontsize=11, fontweight="bold")
+            ax2d.legend(fontsize=9)
+
+            plt.tight_layout()
             plot_path = os.path.join(work_dir, "PES_3D_Plot.png")
-            plt.savefig(plot_path, dpi=300)
+            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
             plt.close()
-            self._pes_log(f"3D PES Plot saved to {plot_path}")
+            self._pes_log(f"3D PES Plot (surface + contour) saved to {plot_path}")
         except Exception as e:
             self._pes_log(f"Failed to generate 3D plot: {str(e)}")
 
