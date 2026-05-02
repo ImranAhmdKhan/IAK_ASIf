@@ -254,7 +254,11 @@ class Pipeline:
                     for idx, (k, v) in enumerate(promoted_xtb, start=1):
                         self._progress("CREST", 55.0 + 15.0 * ((idx - 1) / total), "running", f"CREST search {idx}/{total}.")
                         if k not in self.state["crest"] or self.state["crest"][k].get("status") != "success":
-                            res = self._run_engine_via_wrapper(v["path"], "crest", f"{self.config.crest_method} -T {self.config.cores}", log_cb, status_cb)
+                            crest_flags = f"{self.config.crest_method} -T {self.config.cores}"
+                            res = self._run_engine_via_wrapper(v["path"], "crest", crest_flags, log_cb, status_cb)
+                            if res["status"] != "success":
+                                _log("[WARNING] CREST failed (possible trial MD convergence issue). Retrying with reduced time step (--tstep 1 --mdlen 0.5)...")
+                                res = self._run_engine_via_wrapper(v["path"], "crest", f"{crest_flags} --tstep 1 --mdlen 0.5", log_cb, status_cb)
                             if res["status"] == "success":
                                 final_conf = os.path.join(self.dirs["crest"], f"crest_conformers_{k}.xyz")
                                 shutil.copy2(res["path"], final_conf)
