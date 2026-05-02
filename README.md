@@ -63,8 +63,8 @@ IAK can download and unpack xTB and CREST automatically (Linux/WSL only). ORCA m
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/ImranAhmdKhan/IAK_ASIf.py.git
-cd IAK_ASIf.py
+git clone https://github.com/ImranAhmdKhan/IAK_ASIf.git
+cd IAK_ASIf
 ```
 
 ### 2. Create and activate a virtual environment (recommended)
