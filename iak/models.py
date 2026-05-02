@@ -90,8 +90,8 @@ class Molecule:
             return cls([])
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             raw = f.readlines()
-        # Strip trailing whitespace per line but do NOT discard empty lines so
-        # that the mandatory (possibly blank) comment line keeps its position.
+        # Strip leading/trailing whitespace per line but do NOT discard empty
+        # lines so the mandatory (possibly blank) comment line keeps its index.
         stripped = [l.strip() for l in raw]
         # Skip any leading blank lines before the atom count
         idx = 0
