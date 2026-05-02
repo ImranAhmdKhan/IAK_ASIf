@@ -347,6 +347,12 @@ class Pipeline:
         wd = os.path.abspath(os.path.join(self.dirs.get(engine, self.dirs["inputs"]), f"job_{stem}"))
         os.makedirs(wd, exist_ok=True)
         shutil.copy2(xyz_path, os.path.join(wd, fname))
+        # Add charge/multiplicity flags before platform branching so both Windows and Linux get them
+        if engine in ("xtb", "crest"):
+            if self.config.charge != 0:
+                flags += f" --chrg {self.config.charge}"
+            if self.config.multiplicity != 1:
+                flags += f" --uhf {self.config.multiplicity - 1}"
         if sys.platform == "win32":
             sh_path = os.path.abspath(os.path.join(wd, f"run_{engine}.sh"))
             with open(sh_path, "w", newline="\n", encoding="utf-8") as f:
@@ -371,17 +377,46 @@ class Pipeline:
                     f.write("export PATH='/usr/bin:/bin:/usr/local/bin:$PATH'\n")
                     exec_cmd = engine
                 f.write(f"export OMP_STACKSIZE=1G\nexport OMP_NUM_THREADS={self.config.cores}\nulimit -s unlimited\n")
-                if engine in ("xtb", "crest") and self.config.charge != 0:
-                    flags += f" --chrg {self.config.charge}"
-                if engine in ("xtb", "crest") and self.config.multiplicity != 1:
-                    flags += f" --uhf {self.config.multiplicity - 1}"
+                if engine == "crest":
+                    f.write("export OMPI_ALLOW_RUN_AS_ROOT=1\nexport OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1\n")
+                    f.write("export OMPI_MCA_btl_vader_single_copy_mechanism=none\nexport OMPI_MCA_btl=\"^openib\"\n")
+                    f.write("export OMPI_MCA_rmaps_base_oversubscribe=1\nexport OMPI_MCA_hwloc_base_binding_policy=none\n")
                 f.write(f"{exec_cmd} '{fname}' {flags}\n")
                 f.write(f"/bin/cp -r * '{wsl_wd}/' 2>/dev/null\n")
                 f.write("cd /tmp\n")
                 f.write("/bin/rm -rf \"$SANDBOX\"\n")
             cmd = f"wsl -e bash \"{get_wsl_path(sh_path)}\""
         else:
-            cmd = f"cd '{wd}' && {engine} '{fname}' {flags}"
+            # Build env-var prefix and select correct binary on Linux/macOS
+            env_exports = (
+                f"export OMP_STACKSIZE=1G; "
+                f"export OMP_NUM_THREADS={self.config.cores}; "
+                "ulimit -s unlimited 2>/dev/null; "
+            )
+            if engine == "crest":
+                env_exports += (
+                    "export OMPI_ALLOW_RUN_AS_ROOT=1; "
+                    "export OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1; "
+                    "export OMPI_MCA_btl_vader_single_copy_mechanism=none; "
+                    "export OMPI_MCA_btl='^openib'; "
+                    "export OMPI_MCA_rmaps_base_oversubscribe=1; "
+                    "export OMPI_MCA_hwloc_base_binding_policy=none; "
+                )
+            if engine == "xtb" and _engines.XTB_DIR:
+                xtb_abs = os.path.abspath(_engines.XTB_DIR)
+                xtb_share = os.path.abspath(os.path.join(_engines.XTB_DIR, "..", "share", "xtb"))
+                env_exports += (
+                    f"export PATH='{xtb_abs}:/usr/bin:/bin:/usr/local/bin:$PATH'; "
+                    f"export XTBPATH='{xtb_share}'; "
+                )
+                exec_cmd_linux = f"'{os.path.join(xtb_abs, 'xtb')}'"
+            elif engine == "crest" and _engines.CREST_DIR:
+                crest_abs = os.path.abspath(_engines.CREST_DIR)
+                env_exports += f"export PATH='{crest_abs}:/usr/bin:/bin:/usr/local/bin:$PATH'; "
+                exec_cmd_linux = f"'{os.path.join(crest_abs, 'crest')}'"
+            else:
+                exec_cmd_linux = engine
+            cmd = f"cd '{wd}' && {env_exports}{exec_cmd_linux} '{fname}' {flags}"
 
         if status_cb:
             status_cb(engine, 1)
