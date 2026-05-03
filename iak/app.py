@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+import os as _os
+# Suppress "OpenBLAS Warning: Detect OpenMP Loop … may hang" by disabling
+# OpenBLAS's own threading before numpy is imported.  xTB/CREST/ORCA manage
+# their own parallelism via OMP_NUM_THREADS, so this does not reduce throughput.
+for _blas_var in ("OPENBLAS_NUM_THREADS", "OPENBLAS_MAIN_FREE", "MKL_NUM_THREADS"):
+    _os.environ.setdefault(_blas_var, "1")
+del _blas_var, _os
+
 import argparse
 import csv
 import dataclasses
