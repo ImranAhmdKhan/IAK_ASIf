@@ -30,6 +30,10 @@ from .chemistry import (
 from .utils import _now
 from .job_summary import JobSummaryRecorder
 
+# Substrings found in AT-SPI/dbind diagnostic lines emitted by ORCA on headless
+# Linux systems; these are harmless and should not be shown to the user.
+_AT_SPI_NOISE = ("dbind-", "AT-SPI:", "at-spi")
+
 
 class Pipeline:
     def __init__(self, fragA_path, fragB_paths, n_guests_list, config, out_dir, ratio_label=None, progress_cb=None, reaction_type="Non-covalent", n_anchor=1):
@@ -528,6 +532,7 @@ class Pipeline:
                     f.write("export OMPI_MCA_btl_vader_single_copy_mechanism=none\nexport OMPI_MCA_btl=\"^openib\"\n")
                     f.write("export OMPI_MCA_rmaps_base_oversubscribe=1\nexport OMPI_MCA_hwloc_base_binding_policy=none\n")
                     f.write("export NO_AT_BRIDGE=1\n")
+                    f.write("export DBUS_SESSION_BUS_ADDRESS=/dev/null\n")
                     f.write(f"{exec_cmd} {stem}.inp > '{wsl_wd}/{stem}.out' 2>&1\n")
                     f.write(f"/bin/cp {stem}_trj.xyz '{wsl_wd}/' 2>/dev/null\n")
                     f.write(f"/bin/cp *xyz '{wsl_wd}/' 2>/dev/null\n")
@@ -537,7 +542,7 @@ class Pipeline:
             elif sys.platform == "win32" and _engines.ORCA_IS_WINDOWS:
                 cmd = f"cd /d \"{wd}\" && \"{os.path.join(os.path.abspath(_engines.ORCA_DIR), 'orca.exe')}\" {stem}.inp > {stem}.out 2>&1"
             else:
-                cmd = f"cd '{wd}' && NO_AT_BRIDGE=1 {ORCA_CMD} {stem}.inp > {stem}.out 2>&1"
+                cmd = f"cd '{wd}' && NO_AT_BRIDGE=1 DBUS_SESSION_BUS_ADDRESS=/dev/null {ORCA_CMD} {stem}.inp > {stem}.out 2>&1"
 
             try:
                 proc = subprocess.Popen(cmd, shell=True, cwd=wd)
@@ -551,7 +556,8 @@ class Pipeline:
                                 chunk = f.read()
                                 if chunk and log_cb:
                                     for line in chunk.splitlines(True):
-                                        log_cb(line)
+                                        if not any(tok in line for tok in _AT_SPI_NOISE):
+                                            log_cb(line)
                                 last_pos = f.tell()
                         except Exception:
                             pass
@@ -562,7 +568,8 @@ class Pipeline:
                         chunk = f.read()
                         if chunk and log_cb:
                             for line in chunk.splitlines(True):
-                                log_cb(line)
+                                if not any(tok in line for tok in _AT_SPI_NOISE):
+                                    log_cb(line)
                 trj_file = os.path.join(wd, f"{stem}_trj.xyz")
                 energy, gibbs, imag, success = 0.0, 0.0, 0, False
                 mpirun_crashed, scf_crashed = False, False
