@@ -486,7 +486,11 @@ class Pipeline:
         def _execute_orca(use_mpi: bool, skip_freq: bool):
             inp_file = os.path.join(wd, f"{stem}.inp")
             with open(inp_file, "w", encoding="utf-8", newline="\n") as f:
-                base_method = self.config.orca_method.replace("Opt Freq", "").replace("TightOpt", "").replace("Opt", "").strip()
+                _TASK_KW = frozenset({"opt", "tightopt", "looseopt", "normalopt", "verytightopt",
+                                      "freq", "anfreq", "numfreq", "nofreq"})
+                base_method = " ".join(
+                    w for w in self.config.orca_method.split() if w.lower() not in _TASK_KW
+                ).strip() or self.config.orca_method.split()[0]
                 task = "Opt" if skip_freq else "Opt Freq"
                 f.write(f"! {base_method} {task}\n")
                 f.write(f"%maxcore {self.config.maxcore}\n")
@@ -588,7 +592,11 @@ class Pipeline:
                             if "ORCA TERMINATED NORMALLY" in line:
                                 success = True
                     content_lower = content.lower()
-                    if "mpirun: not found" in content_lower or "aborting the run" in content_lower or "mpi" in content_lower or "hwloc" in content_lower:
+                    _MPI_ERR_TOKENS = (
+                        "mpirun: not found", "mpirun was unable", "aborting the run",
+                        "orte_init", "mpi_abort", "orte has lost", "hwloc",
+                    )
+                    if any(tok in content_lower for tok in _MPI_ERR_TOKENS):
                         mpirun_crashed = True
                     if "scf not converged" in content_lower or "optimization did not converge" in content_lower or "std::bad_alloc" in content_lower or "command not found" in content_lower:
                         scf_crashed = True
@@ -607,8 +615,9 @@ class Pipeline:
             status_cb("orca", 1)
         started = time.time()
         try:
+            tier1_mode = f"Parallel {self.config.cores}-Core" if has_mpi else "Serial 1-Core"
             if log_cb:
-                log_cb(f"\n>>> [Tier 1] Executing ORCA (Parallel {self.config.cores}-Core, Opt Freq): {stem}\n")
+                log_cb(f"\n>>> [Tier 1] Executing ORCA ({tier1_mode}, Opt Freq): {stem}\n")
             success, res, mpi_crash, scf_crash = _execute_orca(use_mpi=has_mpi, skip_freq=False)
             if not success:
                 if mpi_crash and has_mpi:
