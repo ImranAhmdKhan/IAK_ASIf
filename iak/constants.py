@@ -34,6 +34,26 @@ PERIODIC_SYMBOLS = [
 
 ATOMIC_NUMBERS = {symbol: idx + 1 for idx, symbol in enumerate(PERIODIC_SYMBOLS)}
 
+# ORCA input-file keyword sets — used when building the `!` keyword line.
+# Task keywords are stripped from orca_method so only the level-of-theory tokens remain.
+ORCA_TASK_KEYWORDS: frozenset = frozenset({
+    "opt", "tightopt", "looseopt", "normalopt", "verytightopt",
+    "freq", "anfreq", "numfreq", "nofreq",
+})
+
+# Substrings that indicate a genuine MPI / launcher failure in an ORCA output file.
+# Deliberately narrow: normal ORCA parallel output contains "OpenMPI" header text which
+# would false-positive on a plain `"mpi" in content` check.
+ORCA_MPI_ERROR_TOKENS: tuple = (
+    "mpirun: not found",
+    "mpirun was unable",
+    "aborting the run",
+    "orte_init",
+    "mpi_abort",
+    "orte has lost",
+    "hwloc",
+)
+
 
 def normalize_reaction_type(value: Any) -> str:
     text = str(value or "").strip()
