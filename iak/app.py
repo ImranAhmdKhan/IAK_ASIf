@@ -2706,12 +2706,12 @@ class IAKApp:
             try:
                 ncpus   = int(v_ncpus.get().strip() or "32")
                 select  = v_select.get().strip() or "1"
-                total_cpus = ncpus  # per-node CPUs used as MPI ranks
 
-                # Sanitise ORCA keywords: strip "Opt Freq", "TightOpt", "Opt" trailing tasks
-                # so we rebuild consistently
+                # Sanitise ORCA keywords: remove standalone task tokens (Opt Freq, TightOpt,
+                # Opt) so we can append "Opt Freq" consistently. The pattern uses lookahead/
+                # lookbehind to avoid clipping compound words like OptTS or LooseOpt.
                 raw_kw = v_orca_kw.get().strip()
-                base_kw = re.sub(r'\b(TightOpt|Opt\s*Freq|Opt)\b', '', raw_kw).strip()
+                base_kw = re.sub(r'(?<![A-Za-z])(TightOpt|Opt\s*Freq|Opt)(?![A-Za-z])', '', raw_kw).strip()
                 orca_line = f"{base_kw} Opt Freq" if base_kw else "B97-3c Opt Freq"
 
                 lines = [
@@ -2879,9 +2879,13 @@ class IAKApp:
                     "        mpiexec -np $MPI_NP \"$ORCAHOME/orca\" ${CONFNAME}.inp \\",
                     "            > ${CONFNAME}.out 2>&1",
                     "",
-                    "        # Extract final energy",
+                    "        # Extract final energy; warn if ORCA did not converge",
                     "        ENERGY=$(grep 'FINAL SINGLE POINT ENERGY' ${CONFNAME}.out | tail -1 | awk '{print $NF}')",
-                    "        echo \"  conf $i energy: $ENERGY Eh\"",
+                    "        if [[ -z \"$ENERGY\" ]]; then",
+                    "            echo \"  conf $i WARNING: energy not found in ${CONFNAME}.out (ORCA may have failed)\"",
+                    "        else",
+                    "            echo \"  conf $i energy: $ENERGY Eh\"",
+                    "        fi",
                     "",
                     "        i=$(( i + 1 ))",
                     "    done",
