@@ -651,6 +651,9 @@ class IAKApp:
         tk.Button(btn_f, text="ANALYZE FOLDER", command=self._analyze_existing_folder, bg="#6e40c9", fg="white", font=("Segoe UI", 9, "bold")).pack(side="left", fill="x", expand=True, padx=(6, 2))
         tk.Button(btn_f, text="ANALYZE FILES (.out/.xyz)", command=self._analyze_existing_files, bg="#8957e5", fg="white", font=("Segoe UI", 9, "bold")).pack(side="left", fill="x", expand=True, padx=(6, 2))
         tk.Button(btn_f, text="RESUME STOPPED JOB", command=self._resume_existing_job, bg="#238636", fg="white", font=("Segoe UI", 9, "bold")).pack(side="left", fill="x", expand=True, padx=(6, 2))
+        pbs_f = tk.Frame(left, bg=_C["panel"])
+        pbs_f.pack(fill="x", pady=(0, 4))
+        tk.Button(pbs_f, text="EXPORT PBS HPC SCRIPT", command=self._generate_pbs_script, bg="#005f87", fg="white", font=("Segoe UI", 9, "bold")).pack(side="left", fill="x", expand=True, padx=2)
         self.go_btn = tk.Button(left, text="START BATCH PIPELINE", command=self._start, bg=_C["run"], fg="white", font=("Segoe UI", 12, "bold"), pady=10)
         self.go_btn.pack(fill="x", pady=10)
 
@@ -2615,6 +2618,306 @@ class IAKApp:
             "Resume Ready",
             "Existing job loaded.\n\nPress START BATCH PIPELINE to continue from the saved state.\nAlready successful xTB/CREST/ORCA jobs will be skipped.",
         )
+
+    def _generate_pbs_script(self):
+        """Open a dialog to collect HPC settings, then write a complete PBS batch script."""
+        dlg = Toplevel(self.root)
+        dlg.title("Export PBS HPC Batch Script")
+        dlg.configure(bg=_C["panel"])
+        dlg.grab_set()
+        dlg.transient(self.root)
+        self.root.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 340
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 360
+        dlg.geometry(f"680x720+{x}+{y}")
+
+        tk.Label(dlg, text="PBS HPC Script Generator", font=("Segoe UI", 14, "bold"),
+                 bg=_C["panel"], fg=_C["accent"]).pack(pady=(18, 6))
+        tk.Label(dlg, text="Generates a standalone PBS batch script (xTB → CREST → ORCA) for HPC cluster submission.",
+                 font=("Segoe UI", 9, "italic"), bg=_C["panel"], fg=_C["muted"], wraplength=620).pack(pady=(0, 10))
+
+        form = tk.Frame(dlg, bg=_C["panel"])
+        form.pack(fill="x", padx=30, pady=4)
+
+        def row(parent, label, var, width=30):
+            f = tk.Frame(parent, bg=_C["panel"])
+            f.pack(fill="x", pady=3)
+            tk.Label(f, text=label, bg=_C["panel"], fg="white", width=24, anchor="w",
+                     font=("Segoe UI", 9)).pack(side="left")
+            tk.Entry(f, textvariable=var, bg=_C["entry"], fg="white", bd=0, width=width).pack(
+                side="left", fill="x", expand=True, ipady=3)
+            return f
+
+        # PBS directives
+        v_jobname = tk.StringVar(value="IAK_job")
+        v_select  = tk.StringVar(value="1")
+        v_ncpus   = tk.StringVar(value=self._vars.get("cores", tk.StringVar(value="32")).get())
+        v_walltime = tk.StringVar(value="72:00:00")
+        v_queue   = tk.StringVar(value="workq")
+
+        tk.Label(form, text="─── PBS Directives ───", bg=_C["panel"], fg=_C["yellow"],
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(4, 0))
+        row(form, "Job Name (-N):", v_jobname)
+        row(form, "Nodes / select (-l select):", v_select)
+        row(form, "CPUs per node (ncpus):", v_ncpus)
+        row(form, "Walltime (-l walltime):", v_walltime)
+        row(form, "Queue (-q):", v_queue)
+
+        # Software paths
+        v_xtbhome  = tk.StringVar(value="/opt/xtb")
+        v_cresthome = tk.StringVar(value="/opt/crest")
+        v_orcahome  = tk.StringVar(value="/opt/orca")
+
+        tk.Label(form, text="─── Software Paths (on HPC) ───", bg=_C["panel"], fg=_C["yellow"],
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(10, 0))
+        row(form, "xTB home (XTBHOME):", v_xtbhome)
+        row(form, "CREST home (CRESTHOME):", v_cresthome)
+        row(form, "ORCA home (ORCAHOME):", v_orcahome)
+
+        # Chemistry — pre-filled from GUI
+        charge_val = self._vars.get("charge", tk.StringVar(value="0")).get() or "0"
+        mult_val   = self._vars.get("mult",   tk.StringVar(value="1")).get() or "1"
+        orca_method_val = self._vars.get("orca_method", tk.StringVar(value="B97-3c Opt Freq")).get()
+        maxcore_val = self._vars.get("maxcore", tk.StringVar(value="2000")).get() or "2000"
+        crest_ewin_val = self._vars.get("crest_ewin_kcal", tk.StringVar(value="20")).get() or "20"
+        nconf_default = self._vars.get("n_run_crest", tk.StringVar(value="5")).get() or "5"
+
+        v_charge  = tk.StringVar(value=charge_val)
+        v_mult    = tk.StringVar(value=mult_val)
+        v_ewin    = tk.StringVar(value=crest_ewin_val)
+        v_nconf   = tk.StringVar(value=nconf_default)
+        v_orca_kw = tk.StringVar(value=orca_method_val)
+        v_maxcore = tk.StringVar(value=maxcore_val)
+
+        tk.Label(form, text="─── Chemistry Settings ───", bg=_C["panel"], fg=_C["yellow"],
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(10, 0))
+        row(form, "Charge:", v_charge, width=10)
+        row(form, "Multiplicity:", v_mult, width=10)
+        row(form, "CREST energy window (kcal):", v_ewin, width=10)
+        row(form, "ORCA conformers to refine:", v_nconf, width=10)
+        row(form, "ORCA keywords:", v_orca_kw)
+        row(form, "ORCA maxcore (MB/core):", v_maxcore, width=10)
+
+        status_lbl = tk.Label(dlg, text="", bg=_C["panel"], fg=_C["green"],
+                              font=("Segoe UI", 9, "italic"))
+        status_lbl.pack(pady=(6, 0))
+
+        def _do_generate():
+            try:
+                ncpus   = int(v_ncpus.get().strip() or "32")
+                select  = v_select.get().strip() or "1"
+
+                # Sanitise ORCA keywords: remove standalone task tokens (Opt Freq, TightOpt,
+                # Opt) so we can append "Opt Freq" consistently. The pattern uses lookahead/
+                # lookbehind to avoid clipping compound words like OptTS or LooseOpt.
+                raw_kw = v_orca_kw.get().strip()
+                base_kw = re.sub(r'(?<![A-Za-z])(TightOpt|Opt\s*Freq|Opt)(?![A-Za-z])', '', raw_kw).strip()
+                orca_line = f"{base_kw} Opt Freq" if base_kw else "B97-3c Opt Freq"
+
+                lines = [
+                    "#!/bin/bash",
+                    f"#PBS -S /bin/bash",
+                    f"#PBS -N {v_jobname.get().strip() or 'IAK_job'}",
+                    f"#PBS -l select={select}:ncpus={ncpus}",
+                    f"#PBS -l walltime={v_walltime.get().strip() or '72:00:00'}",
+                    f"#PBS -q {v_queue.get().strip() or 'workq'}",
+                    f"#PBS -o {v_jobname.get().strip() or 'IAK_job'}.out",
+                    f"#PBS -e {v_jobname.get().strip() or 'IAK_job'}.err",
+                    "#PBS -j oe",
+                    "",
+                    "###############################################################################",
+                    "# xTB (threaded) -> CREST (threaded) -> ORCA (MPI-only)",
+                    "# Generated by IAK v11.2 PBS Script Exporter",
+                    "###############################################################################",
+                    "",
+                    'cd "$PBS_O_WORKDIR" || exit 1',
+                    "",
+                    "############################",
+                    "# LOAD MPI",
+                    "############################",
+                    "module load openmpi/4.0.0",
+                    "",
+                    "############################",
+                    "# CPU / MPI LAYOUT",
+                    "############################",
+                    'TOTAL_CPUS=$(wc -l < "$PBS_NODEFILE")',
+                    "",
+                    "# Threading for xTB / CREST",
+                    f"XTB_THREADS={ncpus}",
+                    "",
+                    "# MPI ranks for ORCA",
+                    "MPI_NP=$TOTAL_CPUS",
+                    "",
+                    "############################",
+                    "# CHEMISTRY",
+                    "############################",
+                    f"CHARGE={v_charge.get().strip() or '0'}",
+                    f"MULT={v_mult.get().strip() or '1'}",
+                    f"EWIN={v_ewin.get().strip() or '20'}",
+                    f"NCONF_ORCA={v_nconf.get().strip() or '5'}",
+                    f"MAXCORE={v_maxcore.get().strip() or '2000'}",
+                    "",
+                    "############################",
+                    "# SOFTWARE PATHS",
+                    "############################",
+                    f"XTBHOME={v_xtbhome.get().strip() or '/opt/xtb'}",
+                    f"CRESTHOME={v_cresthome.get().strip() or '/opt/crest'}",
+                    f"ORCAHOME={v_orcahome.get().strip() or '/opt/orca'}",
+                    "",
+                    "############################",
+                    "# ENVIRONMENT",
+                    "############################",
+                    "export PATH=$XTBHOME/bin:$CRESTHOME:$ORCAHOME:$PATH",
+                    "export LD_LIBRARY_PATH=$XTBHOME/lib:$LD_LIBRARY_PATH",
+                    "",
+                    "# BLAS safety — disable threading inside MPI ranks",
+                    "export OPENBLAS_NUM_THREADS=1",
+                    "export MKL_NUM_THREADS=1",
+                    "export BLIS_NUM_THREADS=1",
+                    "",
+                    "############################",
+                    "# INFO",
+                    "############################",
+                    'echo "Host        : $(hostname)"',
+                    'echo "Total CPUs  : $TOTAL_CPUS"',
+                    'echo "xTB threads : $XTB_THREADS"',
+                    'echo "ORCA MPI    : $MPI_NP ranks"',
+                    'echo "Charge/Mult : $CHARGE / $MULT"',
+                    'echo "xTB         : $(xtb --version 2>&1 | head -n 1)"',
+                    'echo "CREST       : $(crest --version 2>&1 | head -n 1)"',
+                    'echo "MPI exec    : $(which mpiexec)"',
+                    'echo "------------------------------------------------"',
+                    "",
+                    "###############################################################################",
+                    "# MAIN LOOP",
+                    "###############################################################################",
+                    "",
+                    "for xyz in *.xyz; do",
+                    "    [[ -f \"$xyz\" ]] || continue",
+                    "    BASENAME=${xyz%.xyz}",
+                    "",
+                    '    echo "================================================"',
+                    '    echo "Processing: $BASENAME"',
+                    '    echo "================================================"',
+                    "",
+                    "    mkdir -p \"$BASENAME\"",
+                    "    cp \"$xyz\" \"$BASENAME/\"",
+                    "    cd \"$BASENAME\" || exit 1",
+                    "",
+                    "    ############################",
+                    "    # STEP 1: xTB (THREADED)",
+                    "    ############################",
+                    "    if [[ ! -f xtbopt.xyz ]]; then",
+                    "        export OMP_NUM_THREADS=$XTB_THREADS",
+                    "        xtb \"$xyz\" \\",
+                    "            --gfn2 \\",
+                    "            --chrg $CHARGE \\",
+                    "            --uhf $(( MULT - 1 )) \\",
+                    "            --opt tight \\",
+                    "            -T $XTB_THREADS \\",
+                    "            > \"${BASENAME}_xtb.out\" 2>&1",
+                    "    fi",
+                    "",
+                    "    ############################",
+                    "    # STEP 2: CREST (THREADED)",
+                    "    ############################",
+                    "    if [[ ! -f crest_conformers.xyz ]]; then",
+                    "        export OMP_NUM_THREADS=$XTB_THREADS",
+                    "        crest xtbopt.xyz \\",
+                    "            --gfn2 \\",
+                    "            --chrg $CHARGE \\",
+                    "            --uhf $(( MULT - 1 )) \\",
+                    "            --ewin $EWIN \\",
+                    "            --noreftopo \\",
+                    "            -T $XTB_THREADS \\",
+                    "            > \"${BASENAME}_crest.out\" 2>&1",
+                    "    fi",
+                    "",
+                    "    ############################",
+                    "    # STEP 3: SPLIT CREST MULTI-XYZ",
+                    "    ############################",
+                    "    mkdir -p ORCA",
+                    "",
+                    "    awk '",
+                    "    NR==1 {natoms=$1; conf=1; line=0}",
+                    "    {",
+                    "        line++",
+                    r'        print > sprintf("ORCA/conf_%02d.xyz", conf)',
+                    "        if (line == natoms + 2) {",
+                    r'            close(sprintf("ORCA/conf_%02d.xyz", conf))',
+                    "            line=0; conf++",
+                    "        }",
+                    "    }",
+                    "    ' crest_conformers.xyz",
+                    "",
+                    "    ############################",
+                    "    # STEP 4: ORCA (MPI ONLY)",
+                    "    ############################",
+                    "    cd ORCA || exit 1",
+                    "",
+                    "    export OMP_NUM_THREADS=1   # CRITICAL for MPI ORCA",
+                    "",
+                    "    i=1",
+                    "    for conf in conf_*.xyz; do",
+                    "        [[ $i -le $NCONF_ORCA ]] || break",
+                    "",
+                    "        CONFNAME=$(printf \"%s_conf%02d\" \"$BASENAME\" \"$i\")",
+                    "",
+                    "        cat > ${CONFNAME}.inp <<EOF",
+                    f"! {orca_line}",
+                    "%maxcore $MAXCORE",
+                    "%pal nprocs $MPI_NP end",
+                    "%geom",
+                    "  MaxIter 350",
+                    "end",
+                    "%scf",
+                    "  MaxIter 350",
+                    "end",
+                    "* xyzfile $CHARGE $MULT ${conf}",
+                    "EOF",
+                    "",
+                    "        mpiexec -np $MPI_NP \"$ORCAHOME/orca\" ${CONFNAME}.inp \\",
+                    "            > ${CONFNAME}.out 2>&1",
+                    "",
+                    "        # Extract final energy; warn if ORCA did not converge",
+                    "        ENERGY=$(grep 'FINAL SINGLE POINT ENERGY' ${CONFNAME}.out | tail -1 | awk '{print $NF}')",
+                    "        if [[ -z \"$ENERGY\" ]]; then",
+                    "            echo \"  conf $i WARNING: energy not found in ${CONFNAME}.out (ORCA may have failed)\"",
+                    "        else",
+                    "            echo \"  conf $i energy: $ENERGY Eh\"",
+                    "        fi",
+                    "",
+                    "        i=$(( i + 1 ))",
+                    "    done",
+                    "",
+                    "    cd ../..   # back to workdir",
+                    "done",
+                    "",
+                    'echo "All done."',
+                ]
+
+                script_text = "\n".join(lines) + "\n"
+
+                out_path = filedialog.asksaveasfilename(
+                    parent=dlg,
+                    title="Save PBS batch script",
+                    defaultextension=".sh",
+                    filetypes=[("Shell scripts", "*.sh"), ("All files", "*")],
+                    initialfile=f"{v_jobname.get().strip() or 'IAK_job'}.sh",
+                )
+                if not out_path:
+                    return
+                with open(out_path, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(script_text)
+                status_lbl.config(text=f"Saved: {os.path.basename(out_path)}", fg=_C["green"])
+                self._append_text(f"\n[PBS Export] Script written to: {out_path}\n")
+                dlg.after(1500, dlg.destroy)
+            except Exception as exc:
+                status_lbl.config(text=f"Error: {exc}", fg=_C["red"])
+
+        tk.Button(dlg, text="Generate & Save Script", command=_do_generate,
+                  bg=_C["run"], fg="white", font=("Segoe UI", 11, "bold"),
+                  relief="flat", cursor="hand2", pady=8).pack(fill="x", padx=30, pady=16)
 
     def _update_guest_count_label(self):
         n = len(self._guest_list)
