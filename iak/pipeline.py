@@ -527,6 +527,7 @@ class Pipeline:
                     f.write("export OMPI_ALLOW_RUN_AS_ROOT=1\nexport OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1\n")
                     f.write("export OMPI_MCA_btl_vader_single_copy_mechanism=none\nexport OMPI_MCA_btl=\"^openib\"\n")
                     f.write("export OMPI_MCA_rmaps_base_oversubscribe=1\nexport OMPI_MCA_hwloc_base_binding_policy=none\n")
+                    f.write("export NO_AT_BRIDGE=1\n")
                     f.write(f"{exec_cmd} {stem}.inp > '{wsl_wd}/{stem}.out' 2>&1\n")
                     f.write(f"/bin/cp {stem}_trj.xyz '{wsl_wd}/' 2>/dev/null\n")
                     f.write(f"/bin/cp *xyz '{wsl_wd}/' 2>/dev/null\n")
@@ -536,7 +537,7 @@ class Pipeline:
             elif sys.platform == "win32" and _engines.ORCA_IS_WINDOWS:
                 cmd = f"cd /d \"{wd}\" && \"{os.path.join(os.path.abspath(_engines.ORCA_DIR), 'orca.exe')}\" {stem}.inp > {stem}.out 2>&1"
             else:
-                cmd = f"cd '{wd}' && {ORCA_CMD} {stem}.inp > {stem}.out 2>&1"
+                cmd = f"cd '{wd}' && NO_AT_BRIDGE=1 {ORCA_CMD} {stem}.inp > {stem}.out 2>&1"
 
             try:
                 proc = subprocess.Popen(cmd, shell=True, cwd=wd)
