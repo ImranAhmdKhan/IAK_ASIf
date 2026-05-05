@@ -233,7 +233,6 @@ _ICE_EUTECTIC = PrebioticScenario(
         "Explored by Monnard, Trinks, and others."
     ),
     relevant_reactions=["hcn_polymerisation", "oligonucleotide_ligation"],
-    extra_xtb_flags=["--etemp", "255.15"],
 )
 
 _TIDAL_POOL = PrebioticScenario(

@@ -503,11 +503,18 @@ class PrebioticPipeline:
     def _run_orca(inp_file: Path, out_file: Path) -> Tuple[bool, Optional[float]]:
         """Call the ORCA binary and parse the output energy."""
         import subprocess
-        result = subprocess.run(
-            ["orca", str(inp_file)],
-            capture_output=True, text=True,
-            cwd=str(inp_file.parent),
-        )
+        try:
+            result = subprocess.run(
+                ["orca", str(inp_file)],
+                capture_output=True, text=True,
+                cwd=str(inp_file.parent),
+            )
+        except FileNotFoundError:
+            logger.error(
+                "ORCA binary not found in PATH.  "
+                "Please install ORCA and add it to PATH before running the pipeline."
+            )
+            return False, None
         out_text = result.stdout + result.stderr
         out_file.write_text(out_text)
         e = parse_orca_energy(out_file)
@@ -521,15 +528,32 @@ class PrebioticPipeline:
         """Extract the final Cartesian coordinates from an ORCA .out file."""
         import re as _re
         text = orca_out.read_text(errors="replace")
-        blocks = _re.findall(
-            r"CARTESIAN COORDINATES \(ANGSTROEM\)\s*\n-+\n((?:.*?\n)+?)-+",
-            text, _re.DOTALL,
-        )
-        if not blocks:
+        # Use a line-by-line split to avoid catastrophic backtracking on the
+        # block-boundary pattern.  We look for the header line then collect
+        # coordinate lines until we hit the separator line.
+        lines = text.splitlines()
+        coord_blocks: list[list[str]] = []
+        i = 0
+        while i < len(lines):
+            if _re.search(r"CARTESIAN COORDINATES \(ANGSTROEM\)", lines[i]):
+                # Skip the separator line (---...) immediately following
+                j = i + 1
+                while j < len(lines) and lines[j].startswith("-"):
+                    j += 1
+                block: list[str] = []
+                while j < len(lines) and not lines[j].startswith("-") and lines[j].strip():
+                    block.append(lines[j])
+                    j += 1
+                if block:
+                    coord_blocks.append(block)
+                i = j
+            else:
+                i += 1
+        if not coord_blocks:
             return None
-        last_block = blocks[-1]
+        last_block = coord_blocks[-1]
         coords = []
-        for line in last_block.splitlines():
+        for line in last_block:
             parts = line.split()
             if len(parts) == 4:
                 try:

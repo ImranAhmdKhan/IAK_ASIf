@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .constants import HARTREE_TO_KCAL, KCAL_TO_KJ
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -492,6 +494,5 @@ def parse_orca_thermochemistry(orca_out: str | Path) -> Dict[str, Optional[float
     # Entropy in cal/mol/K — ORCA prints in Hartree/K; convert
     s_hartree = _find(r"Total entropy correction\s*\.\.\.\s*([-\d.]+)")
     if s_hartree is not None:
-        from .constants import HARTREE_TO_KCAL, KCAL_TO_KJ
         result["entropy_cal_mol_K"] = s_hartree * HARTREE_TO_KCAL * 1000.0
     return result

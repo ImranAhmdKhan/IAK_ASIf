@@ -292,7 +292,7 @@ def temperature_sweep(
     ``delta_G_kcal``, ``K_eq``, ``spontaneous``.
     """
     if temperatures_K is None:
-        temperatures_K = list(range(250, 525, 25))
+        temperatures_K = list(range(250, 725, 25))
 
     rows = []
     for T in temperatures_K:
