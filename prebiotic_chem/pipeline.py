@@ -417,10 +417,15 @@ class PrebioticPipeline:
             inp_file = step_dir / f"{label}.inp"
             out_file = step_dir / f"{label}.out"
 
-            # Read optimised geometry from step 4 (parse from .out or use stored coords)
+            # Read optimised geometry from step 4
             syms = res["symbols"]
-            coords_from_opt = self._read_orca_opt_coords(res["out_file"]) or \
-                              np.zeros((len(syms), 3))
+            coords_from_opt = self._read_orca_opt_coords(res["out_file"])
+            if coords_from_opt is None:
+                logger.warning(
+                    "[Step 5] Could not extract optimised coordinates for %s "
+                    "— skipping SP to avoid unphysical geometry.", res["label"]
+                )
+                continue
 
             if out_file.exists():
                 logger.info("[Step 5] %s — output found, skipping.", label)

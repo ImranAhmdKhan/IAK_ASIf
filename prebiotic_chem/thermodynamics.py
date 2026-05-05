@@ -284,7 +284,9 @@ def temperature_sweep(
     delta_S_cal_mol_K:
         Reaction entropy in cal mol⁻¹ K⁻¹.
     temperatures_K:
-        Temperatures to evaluate. Defaults to 250–500 K in 25 K steps.
+        Temperatures to evaluate. Defaults to 250–700 K in 25 K steps,
+        covering all canonical prebiotic scenarios from ice-eutectic (255 K)
+        to hydrothermal vents (up to 673 K).
 
     Returns
     -------
