@@ -1,0 +1,10 @@
+# Core scientific Python
+numpy>=1.22
+
+# Optional — required for SMILES → 3-D coordinate generation
+# rdkit>=2022.03   # install via: conda install -c conda-forge rdkit
+
+# External computational chemistry tools (must be installed separately)
+# xtb    >= 6.6   https://xtb-docs.readthedocs.io
+# crest  >= 3.0   https://crest-lab.github.io/crest-docs/
+# orca   >= 5.0   https://www.faccts.de/orca/  (free for academics)
